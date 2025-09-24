@@ -1,0 +1,10 @@
+# ~/.perltidyrc
+-l=120
+-i=4
+-ci=4
+-vt=2
+-pt=2
+-bt=2
+-sbt=2
+-bbt=2
+-se
