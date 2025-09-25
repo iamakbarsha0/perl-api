@@ -5,10 +5,13 @@ use BSON::OID;
 use DateTime;
 use Try::Tiny qw(try catch);
 use Carp qw(confess);
+use Data::Dumper ();
 
 use RebirthAPI::DB;
 
+# ------------------------
 # Collection helper
+# ------------------------
 sub _col {
     my $col;
     try {
@@ -20,101 +23,207 @@ sub _col {
     return $col;
 }
 
-# Helper: build a BSON::OID from various id forms (BSON::OID, 24-hex string, or raw value)
+# ------------------------
+# Helper: normalize id (CORRECT APPROACH)
+# ------------------------
 sub _to_oid {
     my ($id) = @_;
-    return $id if ref($id) && eval { $id->isa('BSON::OID') };
-    # If it's a 24-hex string, convert to 12-byte binary then use 'value'
-    if (defined($id) && $id =~ /^[0-9a-f]{24}$/i) {
-        my $bytes = pack('H*', lc $id);
-        return BSON::OID->new(value => $bytes);
-    }
-    return BSON::OID->new(value => $id)   if defined $id;
-    return undef;
+    return undef unless defined $id;
+    return undef unless $id =~ /^[0-9a-fA-F]{24}$/;
+    
+    # Convert hex string to 12-byte binary data
+    my $binary = pack("H*", $id);
+    
+    # Create BSON::OID from binary data (not hex string!)
+    return BSON::OID->new( oid => $binary );
 }
 
-# Fetch all users from the database
+# ------------------------
+# Fetch all users
+# ------------------------
 sub get_users {
     my @docs;
-
     try {
         @docs = _col()->find->all;
-        my $fetched = scalar @docs;
-        print "[Model] get_users fetched via cursor: $fetched \n";
-        return [ @docs ];
+        print "[Model] get_users fetched via cursor: " . scalar(@docs) . "\n";
+        # [Model] get_users fetched via cursor: 97
+        return \@docs;
     }
     catch {
         confess "DB_ERROR: get_users failed: $_";
     };
 }
 
-# Fetch a single user by ID
+# ------------------------
+# Fetch single user by id
+# ------------------------
 sub get_user {
     my ($id) = @_;
     my $doc;
+
     try {
+        print "[MODEL] id input ----> $id\n";
+        # [MODEL] id input ----> 68d52124a46acc27e28ae271
+        
+        # Use the consistent _to_oid helper
         my $oid = _to_oid($id);
-        $doc = _col()->find_one({ _id => $oid });
+        print "[MODEL] converted oid ----> $oid\n";
+        # [MODEL] converted oid ----> 68d52124a46acc27e28ae271
+        
+        if ($oid) {
+            $doc = _col()->find_one({ _id => $oid });
+            print "[MODEL] found with BSON::OID ----> " . ($doc ? "YES" : "NO") . "\n";
+            # [MODEL] found with BSON::OID ----> YES
+        }
+        
+        # Fallback for legacy docs with string ids (if needed)
+        if (!$doc && defined $id) {
+            $doc = _col()->find_one({ _id => $id });
+            print "[MODEL] fallback with string id ----> " . ($doc ? "YES" : "NO") . "\n";
+            # [MODEL] final doc ----> $VAR1 = {
+            #           '_id' => bless( {
+            #                             'oid' => 'h�$j�'�q'
+            #                           }, 'BSON::OID' ),
+            #           'name' => 'akbarsha77',
+            #           'updated_at' => '2025-09-25T11:01:56Z',
+            #           'created_at' => '2025-09-25T11:01:56Z',
+            #           'email' => 'akabrsha77@gmail.com',
+            #           'akbarsha' => 'name',
+            #           'role' => 'user'
+            #         };
+        }
+        
+        print "[MODEL] final doc ----> " . Data::Dumper::Dumper($doc) . "\n";
     }
     catch {
         confess "DB_ERROR: get_user failed: $_";
     };
+
     return $doc;
 }
 
-# Create a new user document
+# ------------------------
+# Create user
+# ------------------------
 sub create_user {
     my ($data) = @_;
 
-    # Basic defaults
+    # prevent duplicate email
+    my $existing = _col()->find_one({ email => $data->{email} });
+    if ($existing) {
+        return {
+            success => 0,
+            code    => 'EMAIL_EXISTS',
+            message => 'User with this email already exists'
+        };
+    }
+
     $data->{role}       ||= 'user';
     $data->{created_at} ||= DateTime->now->iso8601() . 'Z';
     $data->{updated_at}   = DateTime->now->iso8601() . 'Z';
-    try {
-        my $res = _col()->insert_one($data);
-        my $oid = $res->inserted_id;        # BSON::OID object
-        $data->{_id} = $oid;                # attach inserted id directly
-    }
-    catch {
-        confess "DB_ERROR: create_user failed: $_";
+
+    my $res = eval {
+        my $r = _col()->insert_one($data);
+        $data->{_id} = $r->inserted_id;
+        return $data;
     };
-    return $data;
+
+    if ($@) {
+        return {
+            success => 0,
+            code    => 'DB_ERROR',
+            message => "Failed to create user: $@"
+        };
+    }
+
+    return { success => 1, data => $res };
 }
 
-# Update an existing user document
+# ------------------------
+# Update user
+# ------------------------
 sub update_user {
     my ($id, $data) = @_;
-    warn "[Model] data - 1 ----> $data";
 
-    $data->{updated_at} = DateTime->now->iso8601() . 'Z';
+    # Use the consistent _to_oid helper
+    my $oid = _to_oid($id);
+    return undef unless $oid;
+
+    print "\n[DEBUG] Incoming id string  --> $id\n";
+    # [DEBUG] Incoming id string  --> 68d52661cb41f0277bab6451
+    print "[DEBUG] Converted BSON::OID --> $oid\n";
+    # [DEBUG] Converted BSON::OID --> 68d52661cb41f0277bab6451
+
+    # Prepare fields to update
+    my %update;
+    for my $field (qw(name email)) {
+        $update{$field} = $data->{$field} if exists $data->{$field};
+    }
+    $update{updated_at} = DateTime->now->iso8601() . 'Z';
+
+    my $res;
     try {
-        my $updateUser = _col()->update_one(
-            { _id => _to_oid($id) },
-            { '$set' => $data }
+        $res = _col()->update_one(
+            { _id => $oid },
+            { '$set' => \%update }
         );
-        warn "[Model] updateUser ----> " . Data::Dumper::Dumper($updateUser);
-
+        
+        print "[DEBUG] Update matched_count --> " . $res->matched_count . "\n";
+        # [DEBUG] Update matched_count --> 1
+        print "[DEBUG] Update modified_count --> " . $res->modified_count . "\n";
+        # [DEBUG] Update modified_count --> 1
+        
+        # Fallback for legacy docs with string ids (if needed)
+        if (!$res->matched_count && defined $id) {
+            print "[DEBUG] Trying fallback with string id\n";
+            $res = _col()->update_one(
+                { _id => $id },
+                { '$set' => \%update }
+            );
+            print "[DEBUG] Fallback matched_count --> " . $res->matched_count . "\n";
+        }
+        
+        return undef unless $res && $res->matched_count;
     }
     catch {
         confess "DB_ERROR: update_user failed: $_";
     };
-    warn "[Model] data - 2 ----> " . Data::Dumper::Dumper($data);
-    # Return the updated document so callers receive a hashref
-    my $updated = get_user($id);
-    return $updated;
+
+    # Fetch and return the updated doc using the same OID
+    my $doc = _col()->find_one({ _id => $oid });
+    
+    # Fallback if needed
+    if (!$doc && defined $id) {
+        $doc = _col()->find_one({ _id => $id });
+    }
+    
+    return $doc;
 }
 
-# Delete a user document
+# ------------------------
+# Delete user
+# ------------------------
 sub delete_user {
     my ($id) = @_;
     my $deleted = 0;
+
     try {
-        my $res = _col()->delete_one({ _id => _to_oid($id) });
-        $deleted = $res->deleted_count;
+        my $oid = _to_oid($id);
+        if ($oid) {
+            my $res = _col()->delete_one({ _id => $oid });
+            $deleted = $res->deleted_count;
+        }
+        
+        # Fallback for legacy docs with string ids
+        if (!$deleted && defined $id) {
+            my $res2 = _col()->delete_one({ _id => $id });
+            $deleted = $res2->deleted_count;
+        }
     }
     catch {
         confess "DB_ERROR: delete_user failed: $_";
     };
+
     return $deleted;
 }
 
