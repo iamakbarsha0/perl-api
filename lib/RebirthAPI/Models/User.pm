@@ -1,91 +1,121 @@
 package RebirthAPI::Models::User;
 use strict;
 use warnings;
-use MongoDB;
-use YAML::Tiny;
 use BSON::OID;
 use DateTime;
+use Try::Tiny qw(try catch);
+use Carp qw(confess);
 
-sub _config {
-    my $cfg = YAML::Tiny->read('config.yml');
-    return $cfg && $cfg->[0] ? $cfg->[0] : {};
+use RebirthAPI::DB;
+
+# Collection helper
+sub _col {
+    my $col;
+    try {
+        $col = RebirthAPI::DB::collection('users');
+    }
+    catch {
+        confess "DB_ERROR: _col failed: $_";
+    };
+    return $col;
 }
 
-sub _client {
-    my $config = _config();
-    my $plugins = $config->{plugins} || {};
-    my $mongo_cfg = $plugins->{MongoDB} || {};
-    my $mongo_uri = $mongo_cfg->{mongo_uri} || $config->{mongo_uri} || 'mongodb://localhost:27017/rebirth';
-    return MongoDB->connect($mongo_uri);
+# Helper: build a BSON::OID from various id forms (BSON::OID, 24-hex string, or raw value)
+sub _to_oid {
+    my ($id) = @_;
+    return $id if ref($id) && eval { $id->isa('BSON::OID') };
+    # If it's a 24-hex string, convert to 12-byte binary then use 'value'
+    if (defined($id) && $id =~ /^[0-9a-f]{24}$/i) {
+        my $bytes = pack('H*', lc $id);
+        return BSON::OID->new(value => $bytes);
+    }
+    return BSON::OID->new(value => $id)   if defined $id;
+    return undef;
 }
-
-sub _db {
-    my $config = _config();
-    my $plugins = $config->{plugins} || {};
-    my $mongo_cfg = $plugins->{MongoDB} || {};
-    my $db_name = $mongo_cfg->{mongo_db_name} || $config->{mongo_db_name} || 'rebirth';
-    return _client()->get_database($db_name);
-}
-
-sub _collection {
-    return _db()->get_collection('users');
-}
-
-# sub get_users {
-#     return [
-#         { id => 1, name => 'Alice' },
-#         { id => 2, name => 'Bob' },
-#     ];
-# }
 
 # Fetch all users from the database
 sub get_users {
-    my $collection = _collection();
-    # Return all users as an array reference
-    return [ $collection->find->all ];
+    my @docs;
+
+    try {
+        @docs = _col()->find->all;
+        my $fetched = scalar @docs;
+        print "[Model] get_users fetched via cursor: $fetched \n";
+        return [ @docs ];
+    }
+    catch {
+        confess "DB_ERROR: get_users failed: $_";
+    };
 }
 
 # Fetch a single user by ID
 sub get_user {
     my ($id) = @_;
-    my $collection = _collection();
-    return $collection->find_one({ _id => BSON::OID->new( value => $id ) });
+    my $doc;
+    try {
+        my $oid = _to_oid($id);
+        $doc = _col()->find_one({ _id => $oid });
+    }
+    catch {
+        confess "DB_ERROR: get_user failed: $_";
+    };
+    return $doc;
 }
 
 # Create a new user document
 sub create_user {
     my ($data) = @_;
-    my $collection = _collection();
 
     # Basic defaults
     $data->{role}       ||= 'user';
     $data->{created_at} ||= DateTime->now->iso8601() . 'Z';
     $data->{updated_at}   = DateTime->now->iso8601() . 'Z';
-
-    my $result = $collection->insert_one($data);
-    my $id = $result->inserted_id;
-    $id = $id->value if ref($id) && $id->can('value');
-    return get_user($id);
+    try {
+        my $res = _col()->insert_one($data);
+        my $oid = $res->inserted_id;        # BSON::OID object
+        $data->{_id} = $oid;                # attach inserted id directly
+    }
+    catch {
+        confess "DB_ERROR: create_user failed: $_";
+    };
+    return $data;
 }
 
 # Update an existing user document
 sub update_user {
     my ($id, $data) = @_;
-    my $collection = _collection();
+    warn "[Model] data - 1 ----> $data";
+
     $data->{updated_at} = DateTime->now->iso8601() . 'Z';
-    $collection->update_one(
-        { _id => BSON::OID->new( value => $id ) },
-        { '$set' => $data }
-    );
-    return get_user($id);
+    try {
+        my $updateUser = _col()->update_one(
+            { _id => _to_oid($id) },
+            { '$set' => $data }
+        );
+        warn "[Model] updateUser ----> " . Data::Dumper::Dumper($updateUser);
+
+    }
+    catch {
+        confess "DB_ERROR: update_user failed: $_";
+    };
+    warn "[Model] data - 2 ----> " . Data::Dumper::Dumper($data);
+    # Return the updated document so callers receive a hashref
+    my $updated = get_user($id);
+    return $updated;
 }
 
 # Delete a user document
 sub delete_user {
     my ($id) = @_;
-    my $collection = _collection();
-    my $res = $collection->delete_one({ _id => BSON::OID->new( value => $id ) });
-    return $res->deleted_count;
+    my $deleted = 0;
+    try {
+        my $res = _col()->delete_one({ _id => _to_oid($id) });
+        $deleted = $res->deleted_count;
+    }
+    catch {
+        confess "DB_ERROR: delete_user failed: $_";
+    };
+    return $deleted;
 }
 
 1;

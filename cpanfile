@@ -4,6 +4,7 @@ requires 'JSON';
 requires 'YAML::Tiny';
 requires 'DateTime';
 requires 'BSON';
+requires 'Try::Tiny';
 
 recommends "YAML"                    => "0";
 recommends "URL::Encode::XS"         => "0";

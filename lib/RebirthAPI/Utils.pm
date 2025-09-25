@@ -8,21 +8,25 @@ our @EXPORT_OK = qw(normalize_bson);
 
 sub normalize_bson {
     my ($doc) = @_;
-    my %copy = %$doc;
+    # If it's undefined or a plain scalar, just return as-is
+    return $doc unless defined $doc;
 
-    for my $k (keys %copy) {
-        if (ref($copy{$k}) eq 'BSON::OID') {
-            $copy{$k} = $copy{$k}->to_string;
-        }
-        elsif (ref($copy{$k}) eq 'BSON::Int64') {
-            $copy{$k} = 0 + $copy{$k};
-        }
-        elsif (ref($copy{$k}) eq 'DateTime') {
-            $copy{$k} = $copy{$k}->iso8601;
-        }
+    # If the entire value is a BSON::OID, stringify it
+    if (ref($doc) && eval { $doc->isa('BSON::OID') }) {
+        return $doc->to_string;
     }
 
-    return \%copy;
+    # If it's a HASH ref, possibly stringify the _id field
+    if (ref($doc) eq 'HASH') {
+        my $oid = $doc->{_id};
+        if (defined $oid && ref($oid) && eval { $oid->can('to_string') }) {
+            $doc->{_id} = $oid->to_string;
+        }
+        return $doc;
+    }
+
+    # For ARRAY refs or other structures, return as-is for now
+    return $doc;
 }
 
 1;
