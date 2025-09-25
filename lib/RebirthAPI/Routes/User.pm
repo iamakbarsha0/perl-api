@@ -2,106 +2,136 @@ package RebirthAPI::Routes::User;
 
 use strict;
 use warnings;
+
 use Dancer2 appname => 'RebirthAPI::App';
-use JSON qw(decode_json);
 use Data::Dumper ();
 
-use RebirthAPI::Controllers::User;
-use RebirthAPI::Utils qw(normalize_bson);
+use RebirthAPI::Models::User;
+use RebirthAPI::Utils qw(
+    normalize_bson
+    normalize_list
+    ok
+    error
+    json_body_from_raw
+);
 
-# Define the /api/users route
+
+# ------------------------
+# Get all users
+# ------------------------
 get '/api/users' => sub {
-    my $res = RebirthAPI::Controllers::User::get_all_users();
-
-    if (!$res->{success}) {
+    my $users = eval { RebirthAPI::Models::User::get_users() };
+    if ($@) {
         status 500;
-        return { success => 0, err => $res->{error} || 'Internal Server Error!'};
+        return error('Failed to fetch users');
     }
-    
-    # Extract the users arrayref from the hashref
-    my $users = $res->{users} || [];
-
-    # Normalize BSON
-    my @users_clean = map { normalize_bson($_) } @$users;
-    
-    # With serializer JSON enabled, return a Perl data structure
-    return {
-        success => $res->{success},
-        users   => \@users_clean,
-    };
+    return ok({ users => normalize_list($users) });
 };
 
-# Get a single user by ID
+# ------------------------
+# Get one user by ID
+# ------------------------
 get '/api/users/:id' => sub {
-    my $id = route_parameters->get('id');
-    my $res = RebirthAPI::Controllers::User::get_user_by_id($id);
+    my $id   = route_parameters->get('id');
+    my $user = eval { RebirthAPI::Models::User::get_user($id) };
 
-    if (!$res->{success}) {
+    print "[ROUTES] /api/users/:id - user ----> " . Data::Dumper::Dumper($user) . "\n";
+    # [ROUTES] /api/users/:id - user ----> $VAR1 = {
+    #       '_id' => bless( {
+    #                         'oid' => 'h�$j�'�q'
+    #                       }, 'BSON::OID' ),
+    #       'name' => 'akbarsha77',
+    #       'updated_at' => '2025-09-25T11:01:56Z',
+    #       'created_at' => '2025-09-25T11:01:56Z',
+    #       'email' => 'akabrsha77@gmail.com',
+    #       'akbarsha' => 'name',
+    #       'role' => 'user'
+    #     };
+
+    if ($@) {
         status 500;
-        return { success => 0, error => $res->{error} || 'Internal Server Error' };
+        return error('Failed to fetch user');
     }
-
-    if (!$res->{user}) {
+    unless ($user) {
         status 404;
-        return { success => 0, error => 'User not found' };
+        return error('User not found');
     }
-
-    my $user_clean = normalize_bson($res->{user});
-    return { success => 1, user => $user_clean };
+    return ok({ user => normalize_bson($user) });
 };
 
-# Create a new user
+# ------------------------
+# Create new user
+# ------------------------
 post '/api/users' => sub {
-    my $payload = eval { decode_json(request->body // '{}') } || {};
-    my $res = RebirthAPI::Controllers::User::create_user($payload);
+    my $payload = json_body_from_raw(request->body);
 
-    if (!$res->{success}) {
-        status 500; # adjust to 400 if you add validation errors
-        return { success => 0, error => $res->{error} || 'Failed to create user' };
+    # Declare $result properly
+    my $result = RebirthAPI::Models::User::create_user($payload);
+
+    # Handle errors
+    unless ($result->{success}) {
+        if ($result->{code} && $result->{code} eq 'EMAIL_EXISTS') {
+            status 409;  # Conflict
+        } else {
+            status 500;  # Internal server error
+        }
+        return error($result->{message});
     }
 
-    my $user_clean = $res->{user} ? normalize_bson($res->{user}) : undef;
+    # Success: extract $user
+    my $user = $result->{data};
+    my $id = ref($user->{_id}) ? $user->{_id}->to_string : $user->{_id};
+
+    response_header 'Location' => "/api/users/$id" if $id;
     status 201;
-    header 'Location' => "/api/users/" . ($res->{id} // '') if $res->{id};
-    return { success => 1, user => $user_clean, id => $res->{id} };
+    return ok({ user => normalize_bson($user), id => $id });
 };
 
-# Update a user
+# ------------------------
+# Update user
+# ------------------------
 put '/api/users/:id' => sub {
-    my $id = route_parameters->get('id');
-    my $payload = eval { decode_json(request->body // '{}') } || {};
-    my $res = RebirthAPI::Controllers::User::update_user($id, $payload);
+    my $id      = route_parameters->get('id');
+    my $payload = json_body_from_raw(request->body);
 
-    warn "[Route] id ----> $id\n";
-    warn "[Route] paylaod --> " . Data::Dumper::Dumper($payload);
-    warn "[Route] res ----> " . Data::Dumper::Dumper($res);
-
-    if (!$res->{success}) {
-        status 500;
-        return { success => 0, error => $res->{error} || 'Failed to update user' };
-    }
-
-    warn "[Route] res->{user} ----> " . Data::Dumper::Dumper($res->{user});
-    if (!$res->{user}) {
+    my $user = RebirthAPI::Models::User::update_user($id, $payload);
+    print "[ROUTES] udpating user 222222 ----> " . Data::Dumper::Dumper($user) . "\n";
+    # [ROUTES] udpating user 222222 ----> $VAR1 = {
+    #       'name' => 'akbarsha88-3',
+    #       '_id' => bless( {
+    #                         'oid' => 'h�a��'{dQ'
+    #                       }, 'BSON::OID' ),
+    #       'akbarsha' => 'name',
+    #       'role' => 'user',
+    #       'updated_at' => '2025-09-25T11:30:03Z',
+    #       'created_at' => '2025-09-25T11:24:17Z',
+    #       'email' => 'akabrsha88-3@gmail.com'
+    #     };
+    
+    unless ($user) {
         status 404;
-        return { success => 0, error => 'User not found 2' };
+        return error('User not found or update failed');
     }
-
-    my $user_clean = normalize_bson($res->{user});
-    return { success => 1, user => $user_clean };
+    return ok({ user => normalize_bson($user) });
 };
 
-# Delete a user
+# ------------------------
+# Delete user
+# ------------------------
 del '/api/users/:id' => sub {
-    my $id = route_parameters->get('id');
-    my $res = RebirthAPI::Controllers::User::delete_user($id);
+    my $id      = route_parameters->get('id');
+    # $id =~ s/^\s+|\s+$//g if defined $id; # trim whitespace
+    # unless (defined $id && $id =~ /^[0-9a-fA-F]{24}\z/) {
+    #     status 400;
+    #     return error('Invalid id format');
+    # }
+    my $deleted = eval { RebirthAPI::Models::User::delete_user($id) };
 
-    if (!$res->{success}) {
+    if ($@) {
         status 500;
-        return { success => 0, error => $res->{error} || 'Failed to delete user' };
+        return error('Failed to delete user');
     }
-
-    return { success => 1, deleted => $res->{deleted} };
+    return ok({ deleted => $deleted ? 1 : 0 });
 };
 
 1;
