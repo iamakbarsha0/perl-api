@@ -1,13 +1,15 @@
 package RebirthAPI::Models::User;
 use strict;
 use warnings;
-use BSON::OID;
 use DateTime;
 use Try::Tiny qw(try catch);
 use Carp qw(confess);
 use Data::Dumper ();
 
 use RebirthAPI::DB;
+use RebirthAPI::Utils qw(
+    _to_oid
+);
 
 # ------------------------
 # Collection helper
@@ -20,22 +22,8 @@ sub _col {
     catch {
         confess "DB_ERROR: _col failed: $_";
     };
+    die "_col returned undef!" unless $col;
     return $col;
-}
-
-# ------------------------
-# Helper: normalize id (CORRECT APPROACH)
-# ------------------------
-sub _to_oid {
-    my ($id) = @_;
-    return undef unless defined $id;
-    return undef unless $id =~ /^[0-9a-fA-F]{24}$/;
-    
-    # Convert hex string to 12-byte binary data
-    my $binary = pack("H*", $id);
-    
-    # Create BSON::OID from binary data (not hex string!)
-    return BSON::OID->new( oid => $binary );
 }
 
 # ------------------------
@@ -100,43 +88,6 @@ sub get_user {
     };
 
     return $doc;
-}
-
-# ------------------------
-# Create user
-# ------------------------
-sub create_user {
-    my ($data) = @_;
-
-    # prevent duplicate email
-    my $existing = _col()->find_one({ email => $data->{email} });
-    if ($existing) {
-        return {
-            success => 0,
-            code    => 'EMAIL_EXISTS',
-            message => 'User with this email already exists'
-        };
-    }
-
-    $data->{role}       ||= 'user';
-    $data->{created_at} ||= DateTime->now->iso8601() . 'Z';
-    $data->{updated_at}   = DateTime->now->iso8601() . 'Z';
-
-    my $res = eval {
-        my $r = _col()->insert_one($data);
-        $data->{_id} = $r->inserted_id;
-        return $data;
-    };
-
-    if ($@) {
-        return {
-            success => 0,
-            code    => 'DB_ERROR',
-            message => "Failed to create user: $@"
-        };
-    }
-
-    return { success => 1, data => $res };
 }
 
 # ------------------------
