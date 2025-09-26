@@ -4,14 +4,31 @@ use strict;
 use warnings;
 use Exporter 'import';
 use JSON qw(decode_json);
+use BSON::OID;
 
 our @EXPORT_OK = qw(
+    _to_oid
     normalize_bson
     normalize_list
     json_body_from_raw
     ok
     error
 );
+
+# ------------------------
+# Helper: normalize id (CORRECT APPROACH)
+# ------------------------
+sub _to_oid {
+    my ($id) = @_;
+    return undef unless defined $id;
+    return undef unless $id =~ /^[0-9a-fA-F]{24}$/;
+    
+    # Convert hex string to 12-byte binary data
+    my $binary = pack("H*", $id);
+    
+    # Create BSON::OID from binary data (not hex string!)
+    return BSON::OID->new( oid => $binary );
+}
 
 # Convert BSON::OID to string inside a doc
 sub normalize_bson {
