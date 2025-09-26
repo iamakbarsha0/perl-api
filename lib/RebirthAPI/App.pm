@@ -5,6 +5,7 @@ use Dancer2;
 
 # Load routes
 use RebirthAPI::Routes::User;
+use RebirthAPI::Routes::Auth;
 
 our $VERSION = '0.2';
 
