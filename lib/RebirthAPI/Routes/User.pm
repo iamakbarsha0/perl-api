@@ -60,34 +60,6 @@ get '/api/users/:id' => sub {
 };
 
 # ------------------------
-# Create new user
-# ------------------------
-post '/api/users' => sub {
-    my $payload = json_body_from_raw(request->body);
-
-    # Declare $result properly
-    my $result = RebirthAPI::Models::User::create_user($payload);
-
-    # Handle errors
-    unless ($result->{success}) {
-        if ($result->{code} && $result->{code} eq 'EMAIL_EXISTS') {
-            status 409;  # Conflict
-        } else {
-            status 500;  # Internal server error
-        }
-        return error($result->{message});
-    }
-
-    # Success: extract $user
-    my $user = $result->{data};
-    my $id = ref($user->{_id}) ? $user->{_id}->to_string : $user->{_id};
-
-    response_header 'Location' => "/api/users/$id" if $id;
-    status 201;
-    return ok({ user => normalize_bson($user), id => $id });
-};
-
-# ------------------------
 # Update user
 # ------------------------
 put '/api/users/:id' => sub {
