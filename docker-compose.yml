@@ -1,0 +1,44 @@
+version: "3.9"
+
+services:
+  mongo:
+    image: mongo:7
+    container_name: rebirth-mongo
+    ports:
+      - "27017:27017"
+    volumes:
+      - rebirth-data:/data/db
+
+  perl_app:
+    build: .
+    container_name: docker logs -f rebirth_api
+
+    depends_on:
+      - mongo
+    environment:
+      MONGO_URI: "mongodb://mongo:27017/rebirth"
+      MONGO_DB_NAME: "rebirth"
+    expose:
+      - "5001"
+    networks:
+      - webnet
+
+  nginx:
+    image: nginx:latest
+    container_name: perl_nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx:/etc/nginx/conf.d:ro
+      - ./logs:/var/log/nginx
+    depends_on:
+      - perl_app
+    networks:
+      - webnet
+
+volumes:
+  rebirth-data:
+
+networks:
+  webnet:
