@@ -8,6 +8,11 @@ use Try::Tiny;
 use DateTime;
 use RebirthAPI::DB;
 use Data::Dumper ();
+use RebirthAPI::Utils qw(
+    ok
+    error
+    normalize_bson
+);
 
 sub _col {
     my $col;
@@ -41,13 +46,14 @@ sub auth_login {
     if ($existing) {
         return {
             success => 1,
-            message => "Welcome user"
+            user    => $existing,
+            message => "Welcome user",
         };
     } else {
         return {
             success => 0,
-            code => "INVALID_CREDS",
-            error => 'Invalid Credentials! Please check!'
+            error   => "INVALID_CREDS",
+            message => "Invalid Credentials! Please check!",
         };
     }
 }
@@ -58,11 +64,7 @@ sub create_user {
     # prevent duplicate email
     my $existing = _col()->find_one({ email => $data->{email} });
     if ($existing) {
-        return {
-            success => 0,
-            code    => 'EMAIL_EXISTS',
-            message => 'User with this email already exists'
-        };
+        return error("User with this email already exists");
     }
 
     $data->{role}       ||= 'user';
@@ -76,14 +78,10 @@ sub create_user {
     };
 
     if ($@) {
-        return {
-            success => 0,
-            code    => 'DB_ERROR',
-            message => "Failed to create user: $@"
-        };
+        return error("Failed to create user: $@");
     }
 
-    return { success => 1, data => $res };
+    return ok({ user => normalize_bson($res) }, "User created successfully");
 }
 
 1;
