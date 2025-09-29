@@ -18,12 +18,8 @@ post '/api/auth/signup' => sub {
     my $result = RebirthAPI::Models::Auth::create_user($payload);
 
     # Handle errors
-    unless ($result->{success}) {
-        if ($result->{code} && $result->{code} eq 'EMAIL_EXISTS') {
-            status 409;  # Conflict
-        } else {
-            status 500;  # Internal server error
-        }
+    if (!$result->{success}) {
+        status $result->{code} && $result->{code} eq 'EMAIL_EXISTS' ? 409 : 500;
         return error($result->{message});
     }
 
@@ -33,7 +29,7 @@ post '/api/auth/signup' => sub {
 
     response_header 'Location' => "/api/users/$id" if $id;
     status 201;
-    return ok({ user => normalize_bson($user), id => $id });
+    return ok({ user => normalize_bson($user), id => $id }, "User created successfully");
 };
 
 # ------------------------
@@ -51,17 +47,11 @@ post '/api/auth/login' => sub {
 
     if($loggedUser->{success}) {
         status 200;
-        return ok({ 
-            success => normalize_bson($loggedUser)->{success},
-            message => normalize_bson($loggedUser)->{message} 
-        });
+         return ok({ 
+            user => normalize_bson($loggedUser->{user}) 
+        }, "Login success");
     } else {
         status 401;
-        return error($loggedUser);
-        # return error({error => normalize_bson($loggedUser)->{error}});
-        # return error({
-        #     success => normalize_bson($$loggedUser)->{success},
-        #     error => normalize_bson($$loggedUser)->{error}
-        # }); # return the error from the Model
+        return error($loggedUser->{error} || "Invalid credentials");
     }
 }
