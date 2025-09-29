@@ -1,0 +1,5 @@
+logs/
+*.swp
+*.bak
+.DS_Store
+.git/
