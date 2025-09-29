@@ -20,12 +20,12 @@ use RebirthAPI::Utils qw(
 # Get all users
 # ------------------------
 get '/api/users' => sub {
-    my $users = eval { RebirthAPI::Models::User::get_users() };
+    my $all_users = eval { RebirthAPI::Models::User::get_users() };
     if ($@) {
         status 500;
         return error('Failed to fetch users');
     }
-    return ok({ users => normalize_list($users) });
+    return ok({ users => normalize_list($all_users) }, "User created successfully");
 };
 
 # ------------------------
