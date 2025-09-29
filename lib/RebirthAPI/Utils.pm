@@ -69,16 +69,27 @@ sub json_body_from_raw {
 
 # Success response helper
 sub ok {
-    my ($payload) = @_;
+    my ($payload, $message) = @_;
     $payload ||= {};
-    return { success => 1, %{$payload} };
+    $message ||= 'OK';
+    return {
+        success => 1,
+        message => $message,
+        data    => $payload,
+        error   => undef,
+    };
 }
-
 # Error response helper
 sub error {
-    my ($message) = @_;
+    my ($message, $payload) = @_;
     $message ||= 'Internal Server Error';
-    return { success => 0, error => $message };
+    $payload ||= {};
+    return {
+        success => 0,
+        message => $message,
+        data    => $payload,
+        error   => $message,
+    };
 }
 
 1;
