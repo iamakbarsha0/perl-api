@@ -45,7 +45,8 @@ engines:
 
 plugins:
   MongoDB:
-    mongo_uri: "mongodb://localhost:27017/rebirth"
+    # mongo_uri: "mongodb://localhost:27017/rebirth"
+    mongo_uri: "mongodb://mongo:27017/rebirth"
     mongo_db_name: "rebirth"
 # template: "template_toolkit"
 # engines:
