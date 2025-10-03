@@ -48,6 +48,10 @@ plugins:
     # mongo_uri: "mongodb://localhost:27017/rebirth"
     mongo_uri: "mongodb://mongo:27017/rebirth"
     mongo_db_name: "rebirth"
+  SQL:
+    dsn: "dbi:mysql:database=rebirth_perl;host=localhost"
+    user: "root"
+    pass: "root"
 # template: "template_toolkit"
 # engines:
 #   template:
