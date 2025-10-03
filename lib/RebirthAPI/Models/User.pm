@@ -1,181 +1,239 @@
 package RebirthAPI::Models::User;
 use strict;
 use warnings;
+
 use DateTime;
-use Try::Tiny qw(try catch);
-use Carp qw(confess);
-use Data::Dumper ();
+use Fey::Literal;
+use Fey::SQL::Select;
+
+use Fey::Schema;
+use Fey::SQL;
 
 use RebirthAPI::DB;
-use RebirthAPI::Utils qw(
-    _to_oid
-);
-
-# ------------------------
-# Collection helper
-# ------------------------
-sub _col {
-    my $col;
-    try {
-        $col = RebirthAPI::DB::collection('users');
-    }
-    catch {
-        confess "DB_ERROR: _col failed: $_";
-    };
-    die "_col returned undef!" unless $col;
-    return $col;
-}
 
 # ------------------------
 # Fetch all users
 # ------------------------
 sub get_users {
-    my @docs;
-    try {
-        @docs = _col()->find->all;
-        print "[Model] get_users fetched via cursor: " . scalar(@docs) . "\n";
-        # [Model] get_users fetched via cursor: 97
-        return \@docs;
-    }
-    catch {
-        confess "DB_ERROR: get_users failed: $_";
-    };
+    my $schema = RebirthAPI::DB::schema();
+    my $users = $schema->table('users');
+
+    my $select = Fey::SQL::Select->new();
+    $select->select($users->columns)->from($users);
+
+    my $dbh = RebirthAPI::DB::dbh();
+    print "dbh - $dbh\n";
+
+    my $sth = $dbh->prepare($select->sql($dbh));
+    $sth->execute();
+
+    return $sth->fetchall_arrayref({});
 }
+
 
 # ------------------------
 # Fetch single user by id
 # ------------------------
 sub get_user {
     my ($id) = @_;
-    my $doc;
 
-    try {
-        print "[MODEL] id input ----> $id\n";
-        # [MODEL] id input ----> 68d52124a46acc27e28ae271
-        
-        # Use the consistent _to_oid helper
-        my $oid = _to_oid($id);
-        print "[MODEL] converted oid ----> $oid\n";
-        # [MODEL] converted oid ----> 68d52124a46acc27e28ae271
-        
-        if ($oid) {
-            $doc = _col()->find_one({ _id => $oid });
-            print "[MODEL] found with BSON::OID ----> " . ($doc ? "YES" : "NO") . "\n";
-            # [MODEL] found with BSON::OID ----> YES
-        }
-        
-        # Fallback for legacy docs with string ids (if needed)
-        if (!$doc && defined $id) {
-            $doc = _col()->find_one({ _id => $id });
-            print "[MODEL] fallback with string id ----> " . ($doc ? "YES" : "NO") . "\n";
-            # [MODEL] final doc ----> $VAR1 = {
-            #           '_id' => bless( {
-            #                             'oid' => 'h�$j�'�q'
-            #                           }, 'BSON::OID' ),
-            #           'name' => 'akbarsha77',
-            #           'updated_at' => '2025-09-25T11:01:56Z',
-            #           'created_at' => '2025-09-25T11:01:56Z',
-            #           'email' => 'akabrsha77@gmail.com',
-            #           'akbarsha' => 'name',
-            #           'role' => 'user'
-            #         };
-        }
-        
-        print "[MODEL] final doc ----> " . Data::Dumper::Dumper($doc) . "\n";
-    }
-    catch {
-        confess "DB_ERROR: get_user failed: $_";
-    };
+    # Get the schema and table
+    my $schema = RebirthAPI::DB::schema();
+    my $users  = $schema->table('users');
 
-    return $doc;
+    # Build the SQL SELECT statement
+    my $select = Fey::SQL::Select->new();
+    $select->select($users->columns)
+           ->from($users)
+           ->where($users->column('id'), '=', Fey::Literal->new_from_scalar($id));
+        #    ->where($users->column('id'), '=', Fey::Literal->new({ value => $id }));
+
+    # Prepare and execute the statement
+    my $dbh = RebirthAPI::DB::dbh();
+    my $sth = $dbh->prepare($select->sql($dbh));
+    $sth->execute();
+
+    # Return the first row as a hashref
+    return $sth->fetchrow_hashref();
 }
+# sub get_user {
+#     my ($id) = @_;
+#     my $dbh = RebirthAPI::DB::dbh();
+#     my $sth = $dbh->prepare("SELECT * FROM users WHERE id = ?");
+#     $sth->execute($id);
+
+#     return $sth->fetchrow_hashref();
+# }
+
+sub create_user {
+    my ($data) = @_;
+    my $dbh = RebirthAPI::DB::dbh();
+    my $now = DateTime->now->strftime('%Y-%m-%d %H:%M:%S');
+    
+    my $sql = q{
+        INSERT INTO users (name, email, role, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?)
+    };
+    
+    $dbh->do( 
+        $sql,
+        undef,
+        $data->{name},
+        $data->{email},
+        $data->{role} // 'user',
+        $now,
+        $now
+    );
+    
+    my $id = $dbh->{mysql_insertid};
+    
+    return {
+        id         => $id,
+        name       => $data->{name},
+        email      => $data->{email},
+        role       => $data->{role} // 'user',
+        created_at => $now,
+        updated_at => $now,
+    };
+}
+# sub create_user {
+#     my ($data) = @_;
+#     my $dbh = RebirthAPI::DB::dbh();
+#     my $now = DateTime->now->strftime('%Y-%m-%d %H:%M:%S');
+#     my $sth = $dbh->prepare("INSERT INTO users (name, email, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?)");
+#     $sth->execute($data->{name}, $data->{email}, $data->{role} // 'user', $now, $now);
+#     my $id = $dbh->{mysql_insertid};
+#     return {
+#         id => $id,
+#         name => $data->{name},
+#         email => $data->{email},
+#         role => $data->{role} // 'user',
+#         created_at => $now,
+#         updated_at => $now,
+#     };
+# }
+# ------------------- NOT WORKING -------------------
+# ------------------- NOT WORKING -------------------
+# sub create_user {
+#     my ($data) = @_;
+#     my $dbh = RebirthAPI::DB::dbh();
+#     my $schema = RebirthAPI::DB::schema();
+#     my $now = DateTime->now->strftime('%Y-%m-%d %H:%M:%S');
+    
+#     my $users = $schema->table('users');
+    
+#     my $insert = Fey::SQL->new_insert()->into($users);
+#     $insert->values(
+#         name       => $data->{name},
+#         email      => $data->{email},
+#         role       => $data->{role} // 'user',
+#         created_at => $now,
+#         updated_at => $now,
+#     );
+    
+#     $dbh->do($insert->sql($dbh), undef, $insert->bind_params());
+#     my $id = $dbh->{mysql_insertid};
+    
+#     return {
+#         id         => $id,
+#         name       => $data->{name},
+#         email      => $data->{email},
+#         role       => $data->{role} // 'user',
+#         created_at => $now,
+#         updated_at => $now,
+#     };
+# }
 
 # ------------------------
 # Update user
 # ------------------------
 sub update_user {
     my ($id, $data) = @_;
+    my $schema = RebirthAPI::DB::schema();
+    my $users = $schema->table('users');
 
-    # Use the consistent _to_oid helper
-    my $oid = _to_oid($id);
-    return undef unless $oid;
+    my $now = DateTime->now->iso8601();
 
-    print "\n[DEBUG] Incoming id string  --> $id\n";
-    # [DEBUG] Incoming id string  --> 68d52661cb41f0277bab6451
-    print "[DEBUG] Converted BSON::OID --> $oid\n";
-    # [DEBUG] Converted BSON::OID --> 68d52661cb41f0277bab6451
+    my @update;
+    push @update, $users->column('name') => $data->{name} if exists $data->{name};
+    push @update, $users->column('email') => $data->{email} if exists $data->{email};
+    push @update, $users->column('role') => $data->{role} if exists $data->{role};
+    push @update, $users->column('updated_at') => $now;
 
-    # Prepare fields to update
-    my %update;
-    for my $field (qw(name email)) {
-        $update{$field} = $data->{$field} if exists $data->{$field};
-    }
-    $update{updated_at} = DateTime->now->iso8601() . 'Z';
-
-    my $res;
-    try {
-        $res = _col()->update_one(
-            { _id => $oid },
-            { '$set' => \%update }
-        );
-        
-        print "[DEBUG] Update matched_count --> " . $res->matched_count . "\n";
-        # [DEBUG] Update matched_count --> 1
-        print "[DEBUG] Update modified_count --> " . $res->modified_count . "\n";
-        # [DEBUG] Update modified_count --> 1
-        
-        # Fallback for legacy docs with string ids (if needed)
-        if (!$res->matched_count && defined $id) {
-            print "[DEBUG] Trying fallback with string id\n";
-            $res = _col()->update_one(
-                { _id => $id },
-                { '$set' => \%update }
-            );
-            print "[DEBUG] Fallback matched_count --> " . $res->matched_count . "\n";
-        }
-        
-        return undef unless $res && $res->matched_count;
-    }
-    catch {
-        confess "DB_ERROR: update_user failed: $_";
-    };
-
-    # Fetch and return the updated doc using the same OID
-    my $doc = _col()->find_one({ _id => $oid });
     
-    # Fallback if needed
-    if (!$doc && defined $id) {
-        $doc = _col()->find_one({ _id => $id });
-    }
-    
-    return $doc;
+    my $update_sql = Fey::SQL->new_update();
+    $update_sql->update($users)
+                ->set(@update)
+                ->where($users->column('id'), '=', $id);
+
+    my $dbh = RebirthAPI::DB::dbh();
+    my $sth = $dbh->prepare($update_sql->sql($dbh));
+    $sth->execute($update_sql->bind_params);
+
+    return get_user($id);
 }
+# sub update_user {
+#     my ($id, $data) = @_;
+#     my $dbh = RebirthAPI::DB::dbh();
 
-# ------------------------
-# Delete user
-# ------------------------
+#     my $now = DateTime->now->iso8601();
+
+#     # Build update fields dynamically
+#     my @fields;
+#     my @binds;
+
+#     if (exists $data->{name}) {
+#         push @fields, "name = ?";
+#         push @binds,  $data->{name};
+#     }
+#     if (exists $data->{email}) {
+#         push @fields, "email = ?";
+#         push @binds,  $data->{email};
+#     }
+#     if (exists $data->{role}) {
+#         push @fields, "role = ?";
+#         push @binds,  $data->{role};
+#     }
+
+#     # Always update updated_at
+#     push @fields, "updated_at = ?";
+#     push @binds,  $now;
+
+#     my $sql = "UPDATE users SET " . join(", ", @fields) . " WHERE id = ?";
+#     push @binds, $id;
+
+#     my $sth = $dbh->prepare($sql);
+#     $sth->execute(@binds);
+
+#     return get_user($id);
+# }
+
+# # ------------------------
+# # Delete user
+# # ------------------------
 sub delete_user {
     my ($id) = @_;
-    my $deleted = 0;
+    my $schema = RebirthAPI::DB::schema();
+    my $users = $schema->table('users');
 
-    try {
-        my $oid = _to_oid($id);
-        if ($oid) {
-            my $res = _col()->delete_one({ _id => $oid });
-            $deleted = $res->deleted_count;
-        }
-        
-        # Fallback for legacy docs with string ids
-        if (!$deleted && defined $id) {
-            my $res2 = _col()->delete_one({ _id => $id });
-            $deleted = $res2->deleted_count;
-        }
-    }
-    catch {
-        confess "DB_ERROR: delete_user failed: $_";
-    };
+    my $delete_sql = Fey::SQL::Delete->new();
+    $delete_sql->from($users)
+                ->where($users->column('id'), '=', Fey::Literal->new_from_scalar($id));
 
-    return $deleted;
+    my $dbh = RebirthAPI::DB::dbh();
+    my $sth = $dbh->prepare($delete_sql->sql($dbh));
+    $sth->execute($delete_sql->bind_params);
+
+    return $sth->rows; # 1 if deleted, 0 if not found 
 }
+# sub delete_user {
+#     my ($id) = @_;
+
+#     my $dbh = RebirthAPI::DB::dbh();
+#     my $sth = $dbh->prepare("DELETE FROM users WHERE id = ?");
+#     $sth->execute($id);
+
+#     return $sth->rows;  # returns 1 if deleted, 0 if not found
+# }
 
 1;
